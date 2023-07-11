@@ -1,0 +1,546 @@
+<style>
+  .hide {
+    background-color: #20c997;
+    border: 1px solid #20c997;
+  }
+  .text {
+    text-align: justify;
+    color: white;
+  }
+  .liture {
+    border: 4px solid black;
+    display: inline-block;
+    padding: 5px;
+  }
+  .main {
+    background-color: #f7fad3;
+    display: flex;
+    justify-content: space-between;
+  }
+  .main h3 {
+    text-align: center;
+  }
+  .check {
+    position: relative;
+  }
+  .main_len {
+    display: inline-block;
+    width: 50%;
+  }
+  ol {
+    margin: 10 px;
+  }
+</style>
+
+<body>
+  <div class="hide">
+    <div class="text">
+      <h2>
+        Формирование XSD схемы на основании структурированного описания форматов
+        электронных документов
+      </h2>
+      Версия 1.0, ФССП России, 11.07.2023.
+      <br />Форматы документов и XSD схемы публикуются на
+      <a href="https://fssp.gov.ru" target="_blank">сайте ФССП России</a> в
+      разделе
+      <a href="https://fssp.gov.ru/mvv_fssp/" target="_blank"
+        >Деятельность / Межведомственное взаимодействие</a
+      >
+    </div>
+    <p></p>
+    <div class="main">
+      <h4>Порядок подготовки описания форматов к обработке:</h4>
+      <ol>
+        <li>
+          Открыть описание форматов в формате ODS в текстовом редакторе
+          по-умолчанию (например, LibreOffice Writer)
+        </li>
+        <li>
+          Сохранить как... Текст (*.txt). Убедитесь, что выбрана кодировка UTF8
+          для сохраняемого текстового файла
+        </li>
+        <li>Открыть в Блокноте, проверить содержание и кодировку</li>
+        <li>
+          Заголовок должен содержать пространство имен, являющееся
+          идентификатором формата и идентификатор группы реквизитов, являющейся
+          телом XML документа (далее описывается в таблице 2)
+        </li>
+        <li>
+          Таблица 1 должна содержать описание используемых типов реквизитов
+          документа
+        </li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="check">
+    <p>
+      Выберите файл описания форматов
+      <input disabled="true" type="file" id="btInpFile" />
+    </p>
+    <p>Результаты обработки описания форматов:</p>
+    <div id="status"></div>
+    <div id="resultText"></div>
+    <button disabled="true" type="button" id="btGetXSD">
+      Получить ссылку на загрузку XSD схемы
+    </button>
+    <div id="divXSD"></div>
+  </div>
+</body>
+
+<script>
+  // ==================================================
+  // Сервисные функции
+
+  // Показать текущий статус обработки
+  function showStatus(statusText) {
+    document.getElementById('status').innerText = statusText;
+    console.log(statusText);
+  }
+
+  // Показать результат обработки
+  function showLog(statusText) {
+    document.getElementById('resultText').innerHTML += `${statusText}<br/>`;
+    console.log(statusText);
+  }
+
+  // показать / скрыть таблицы
+  let lastShowed = 'tbl1';
+  function doShow(e) {
+    if (lastShowed != e) {
+      document.getElementById(lastShowed).style.display = 'none';
+      lastShowed = e;
+      document.getElementById(lastShowed).style.display = 'block';
+    } else {
+      divTbl = document.getElementById(lastShowed);
+      if (divTbl.style.display == 'block') {
+        divTbl.style.display = 'none';
+      } else {
+        divTbl.style.display = 'block';
+      }
+    }
+    // alert('hello!');
+  }
+
+  // Инициализация вывода
+  showStatus('Начало подготовки приложения');
+  showLog('Инициализация констант и переменных');
+
+  // Инициализация констант и переменных
+
+  let frmtNS = ''; // ns - пространство имен
+  let frmtTag = ''; // составной реквизит тела документа
+
+  // массив таблиц
+  let frmtTbl = []; // массив таблиц
+
+  // массив типов
+  let frmtTypes = []; // массив типов
+  let aTypesCaps = {
+    // Заголовки граф массива "Типы реквизитов"
+    typeNo: '№',
+    typeID: 'Тип реквизита',
+    typeBase: 'Базовый тип данных XSD',
+    typeModf: 'Ограничение базового типа данных в XSD-схеме',
+    typeDesc: 'Описание типа реквизита',
+  };
+
+  // массив реквизитов
+  let frmtRecvs = []; // массив Реквизиты
+  let aRecvsCaps = {
+    // Заголовки граф массива "Реквизиты"
+    recNo: '№',
+    recID: 'Наименование элемента',
+    recName: 'Наименование реквизита документа',
+    recMand: 'Обязательность',
+    recType: 'Тип',
+    recDesc: 'Описание реквизита документа',
+  };
+
+  // ns - пространство имен
+  var reNS =
+    /(?<ns>(http|ftp|https):\/\/([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:\/~+#-]*[\w@?^=%&\/~+#-]))/;
+  // выделение отдельных таблиц из файла
+  let reTbl =
+    /(Таблица)[^\d]+(?<tblNo>\d+)\s*\.?\s*(?<tblName>.*)[\n\r](?<tblData>[\s\S!]+?)((?=Таблица)|$)/gi;
+  // выделение типа таблицы
+  let reTblType = /.+?(?<typeID>[A-Z][a-zA-Z\d]+Type)/gi;
+  // выделение составного реквизита тела документа
+  let reTblTag = /.+?(?<typeID>[A-Z][a-zA-Z\d]+)/gi;
+  // выделение строки с описанием типа из таблицы
+  let reLineType =
+    /(?<typeNo>\d+)\s+(?<typeID>D[a-zA-Z\d]+Type)\s+(?<typeBase>(string|integer|dateTime|date|boolean|decimal|gyear))\s*(?<typeModf>(((minInclusive|maxInclusive|minExclusive|maxExclusive|minLength|maxLength|length|totalDigits|fractionDigits)\s*((value)?\s*[:=]?\s*(['"«]?((\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?)|(-?\d+))['"»]?)?)[,;\s]*)*))(?<typeDesc>[\s\S!]+?)((?=(\d+\s+D[a-zA-Z\d]+Type\s+(string|integer|dateTime|date|boolean|decimal|gyear)))|$)/gi;
+  // выделение ограничений типа
+  let reRestr =
+    /(?<rName>minInclusive|maxInclusive|minExclusive|maxExclusive|minLength|maxLength|length|totalDigits|fractionDigits)\s*((value)?\s*[:=]?\s*(['"«]?(?<rValue>((\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?)|(-?\d+)))['"»]?)?)[,;\s]*/gi;
+  // выделение строки с описанием реквизита из таблицы
+  let reLineRec =
+    /(?<recNo>\d+)\.?\s+(?<recID>[A-Z][a-zA-Z\d]+)(?<recName>[\s\S!]+?)(?<recMand>(да)?)\s+(?<recType>[A-Z][a-zA-Z\d]+Type)(?<recDesc>[\s\S!]+?)((?=(\d+\.?\s+[A-Z][a-zA-Z\d]+)[\s\S!]+?[A-Z][a-zA-Z\d]+Type)|$)/gi;
+
+  // ==================================================
+  // Обработка выбора файла описания форматов
+  showLog('Инициализация обработчика файла');
+  document.getElementById('btInpFile').addEventListener('change', function () {
+    showLog('Начало обработки');
+
+    // Очистка предыдущего результата
+    document.getElementById('resultText').innerText = '';
+    document.getElementById('btGetXSD').disabled = true;
+    document.getElementById('divXSD').innerText = '';
+    frmtTbl = []; // чистим содержание таблицы
+    frmtTypes = [];
+    frmtRecvs = [];
+
+    // Чтение файла
+    let input = document.getElementById('btInpFile');
+    let file = input.files[0];
+    let reader = new FileReader();
+
+    // Загружаем текст из файла
+    showLog('Загрузка файла: ' + file.name);
+    let textReader = '';
+    reader.onload = function () {
+      textReader = reader.result;
+
+      // Определяем пространство имен
+      reNS.lastIndex = 0;
+      let matchNS = reNS.exec(textReader);
+      frmtNS = matchNS.groups.ns;
+      showLog(`Пространство имен: ${frmtNS}<br>`);
+
+      // цикл обработки таблиц
+      let tblCnt = 0; // сбрасываем номер обрабатываемой таблицы
+      let matchTbl;
+      reTbl.lastIndex = 0;
+      while ((matchTbl = reTbl.exec(textReader))) {
+        tblCnt++;
+
+        // формирование информации о таблице
+        let isTypes = tblCnt == 1; // таблица с описанием типов?
+        let isFirst = tblCnt == 2; // таблица тела документа?
+        let oTbl = {
+          no: matchTbl.groups.tblNo, // номер таблицы
+          isTypes: isTypes, // таблица - с описанием типов
+          isFirst: isFirst, // таблица - с описанием типов
+          name: matchTbl.groups.tblName.trim(), // строка над таблицей "Таблица...."
+          data: matchTbl.groups.tblData, // содержание таблицы
+          type: '', // составной тип, описанный в таблице
+          cnt: 0, // счетчик использования составного типа
+        };
+        if (!isTypes) {
+          if (isFirst) {
+            // Определяем составной реквизит тела документа
+            reTblTag.lastIndex = 0;
+            let matchTType = reTblTag.exec(oTbl.name);
+            if (matchTType) {
+              frmtTag = matchTType.groups.typeID;
+              oTbl.type = frmtTag + 'Type';
+            }
+          } else {
+            // Определяем тип данных таблицы
+            reTblType.lastIndex = 0;
+            let matchTType = reTblType.exec(oTbl.name);
+            if (matchTType) {
+              oTbl.type = matchTType.groups.typeID;
+            }
+          }
+        }
+        frmtTbl.push(oTbl);
+
+        // обработка строк таблицы
+        var matchLine;
+        var lineCnt = 0;
+        var lineText = '';
+        let lastNo = 0;
+        if (isTypes) {
+          // **********************************************
+          // обработка типов
+          lineText =
+            lineText +
+            `<div id="ctbl${tblCnt}" class="container">
+              <input id="showtbl${tblCnt}" type="button" value="показать/скрыть" onclick="doShow('tbl${tblCnt}');"/>Таблица ${oTbl.no}. ${oTbl.name}</div>
+              <div id="tbl${tblCnt}" class="container" style="display:none;"><table border="1">
+              <thead><tr><th>${aTypesCaps.typeNo}</th><th>${aTypesCaps.typeID}</th><th>${aTypesCaps.typeBase}</th><th>${aTypesCaps.typeModf}</th><th>${aTypesCaps.typeDesc}</th></tr></thead>
+              <tbody>`;
+          reLineType.lastIndex = 0;
+          while ((matchLine = reLineType.exec(oTbl.data))) {
+            lineCnt++;
+            // добавляем тип в масссив типов
+            let oType = {
+              typeNo: matchLine.groups.typeNo.trim(),
+              typeID: matchLine.groups.typeID.trim(),
+              typeBase: matchLine.groups.typeBase.trim(),
+              typeModf: matchLine.groups.typeModf.trim(),
+              typeDesc: matchLine.groups.typeDesc.trim(),
+              cnt: 0, // счетчик использований
+            };
+            frmtTypes.push(oType);
+            // проверяем нарушение нумерации
+            if (++lastNo != oType.typeNo) {
+              lineText =
+                lineText +
+                `<tr bgcolor=red><td colspan="5">Пропущен номер ${lastNo}</td></tr>`;
+              lastNo = oType.typeNo;
+            }
+            // выводим информацию о реквизите
+            lineText =
+              lineText +
+              `<tr><td>${oType.typeNo}</td><td>${oType.typeID}</td><td>${oType.typeBase}</td><td>${oType.typeModf}</td><td>${oType.typeDesc}</td></tr>`;
+          }
+        } else {
+          // **********************************************
+          // обработка реквизитов
+          lineText =
+            lineText +
+            `<div id="ctbl${tblCnt}" class="container">
+              <input id="showtbl${tblCnt}" type="button" value="показать/скрыть" onclick="doShow('tbl${tblCnt}');"/>Таблица ${oTbl.no}. ${oTbl.name}</div>
+              <div id="tbl${tblCnt}" class="container" style="display:none;"><table border="1">
+              <thead><tr><th>${aRecvsCaps.recNo}</th><th>${aRecvsCaps.recID}</th><th>${aRecvsCaps.recName}</th><th>${aRecvsCaps.recMand}</th><th>${aRecvsCaps.recType}</th><th>${aRecvsCaps.recDesc}</th></tr></thead><tbody>
+              <tr><td colspan="6">Cоставной тип, описанный в таблице: ${oTbl.type}</td></tr>`;
+          reLineRec.lastIndex = 0;
+          while ((matchLine = reLineRec.exec(oTbl.data))) {
+            lineCnt++;
+            // добавляем реквизит в масссив реквизитов
+            let oRecv = {
+              recTbl: oTbl.type, // тип данных, описанный в таблице
+              recNo: matchLine.groups.recNo.trim(),
+              recID: matchLine.groups.recID.trim(),
+              recType: matchLine.groups.recType.trim(),
+              recName: matchLine.groups.recName.trim(),
+              recMand: matchLine.groups.recMand.trim().toUpperCase() == 'ДА',
+              recDesc: matchLine.groups.recDesc.trim(),
+              recComp: false,
+            };
+            frmtRecvs.push(oRecv);
+            // проверяем нарушение нумерации
+            if (++lastNo != oRecv.recNo) {
+              lineText =
+                lineText +
+                `<tr bgcolor=red><td colspan="6">Пропущен номер ${lastNo}</td></tr>`;
+              lastNo = oRecv.recNo;
+            }
+            // проверяем наличие типа данных
+            let oType = frmtTypes.find((x) => x.typeID === oRecv.recType);
+            if (oType) {
+              oType.cnt++;
+            } else {
+              // возможно это составной тип данных, описанный в таблице ниже?
+              oRecv.recComp = /Таблице/i.test(oRecv.recDesc);
+              if (!oRecv.recComp) {
+                lineText += `<tr bgcolor=red><td colspan="6">Тип не обнаружен ${oRecv.recType}. Описание реквизита: ${oRecv.recDesc}</td></tr>`;
+              }
+            }
+            // выводим информацию о реквизите
+            lineText =
+              lineText +
+              `<tr><td>${oRecv.recNo}</td><td>${oRecv.recID}</td><td>${
+                oRecv.recComp ? `СОСТАВНОЙ ТИП: ` : ''
+              }${oRecv.recName}</td><td>${oRecv.recMand}</td><td>${
+                oRecv.recType
+              }</td><td>${oRecv.recDesc}</td></tr>`;
+          }
+        }
+        if (lineCnt == 0) {
+          showLog(`Таблица ${oTbl.no}. ${oTbl.name} : строк не обнаружено!`);
+          //showLog(oTbl.data);
+        } else {
+          if (isTypes) {
+            lineText =
+              lineText +
+              `<tr bgcolor=azure><td colspan="5">Обнаружено типов: ${frmtTypes.length}</td></tr>`;
+          } else {
+            lineText =
+              lineText +
+              `<tr bgcolor=azure><td colspan="6">Обнаружено реквизитов: ${frmtRecvs.length}</td></tr>`;
+          }
+          lineText = lineText + `</tbody></table></div>`;
+          showLog(lineText);
+        }
+      }
+      if (tblCnt == 0) {
+        showLog(`Таблиц не обнаружено`);
+        //showLog(textReader);
+      } else {
+        // **********************************************
+        // проверка консистентности
+
+        // проверка неиспользуемых типов
+        frmtTypes.forEach((x) => {
+          if (x.cnt == 0)
+            showLog(
+              `Обнаружен неиспользуемый тип: № ${x.typeNo}. ${x.typeID} (${x.typeBase});`
+            );
+        });
+        // проверка неиспользуемых составных типов
+        frmtRecvs.forEach((x) => {
+          if (x.recComp) {
+            let oTbl = frmtTbl.find((y) => y.type == x.recType);
+            if (oTbl) {
+              oTbl.cnt++;
+            } else showLog(`ОШИБКА !!!!!:${x.recTbl};`);
+          }
+        });
+        frmtTbl.forEach((x) => {
+          if (!x.isFirst && !x.isTypes && x.cnt == 0 && x.type != '')
+            showLog(`Обнаружен неиспользуемый составной тип: ${x.type};`);
+        });
+
+        showLog(`Проверка типов завершена.`);
+        document.getElementById('btGetXSD').disabled = false;
+      }
+    };
+    reader.readAsText(file);
+
+    showLog('Завершение обработки');
+  });
+
+  // ==================================================
+  // формирование XSD схемы
+  showLog('Инициализация процедуры формирования схемы');
+  document.getElementById('btGetXSD').addEventListener('click', function () {
+    showLog('Начало процедуры формирования схемы');
+    let sXSD = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:fssp="${frmtNS}" targetNamespace="${frmtNS}" elementFormDefault="qualified" attributeFormDefault="unqualified">
+        `;
+    // **********************************************
+    // включение в схему типов данных
+    frmtTypes.forEach((x) => {
+      // TO DO выявление перечня возможных значений
+      // <xs:enumeration value="..."><xs:annotation><xs:documentation>...</xs:documentation></xs:annotation></xs:enumeration>
+      // форматирование ограничений
+      let sRestr = ``;
+      let matchLine;
+      reRestr.lastIndex = 0;
+      while ((matchLine = reRestr.exec(x.typeModf))) {
+        let rName = matchLine.groups.rName;
+        let rValue = matchLine.groups.rValue;
+        sRestr += `<xs:${rName}  value="${rValue}"/>
+            `;
+      }
+      // формирование описания типа
+      sXSD += `
+          <xs:simpleType name="${x.typeID}">
+  	      <xs:annotation><xs:documentation>${x.typeNo}. ${
+        x.typeDesc
+      }</xs:documentation></xs:annotation>
+          <xs:restriction base="xs:${x.typeBase}${
+        sRestr == ''
+          ? `"/>`
+          : `">
+          ${sRestr}</xs:restriction>`
+      }
+      	  </xs:simpleType>
+          `;
+    });
+
+    // **********************************************
+    // включение в схему реквизитов
+    let currTbl = 'notbl';
+    let skipTbl = false;
+    frmtRecvs.forEach((x) => {
+      if (x.recTbl != currTbl) {
+        let isFirst = currTbl == 'notbl';
+
+        // закрыть предыдущее описание
+        if (!isFirst && !skipTbl) {
+          sXSD += `
+                    </xs:sequence>
+                  </xs:extension>
+                </xs:complexContent>
+              </xs:complexType>
+              `;
+        }
+
+        // найдем нужную таблицу
+        currTbl = x.recTbl; // запоминаем новую таблицу, как текущую
+        let oTbl = frmtTbl.find((y) => y.type == currTbl);
+        if (oTbl) {
+          currTblName = oTbl.name; // текст над таблицей пойдет как описание составного типа
+          skipTbl = oTbl.cnt == 0 && !oTbl.isFirst;
+          if (skipTbl) showLog(`Пропущена ненужная таблица: ${currTbl}!`);
+        } else {
+          showLog(`Не найдено описание составного типа ${currTbl}!`);
+          currTblName = '';
+        }
+
+        if (!skipTbl) {
+          // открыть описание для новой таблицы - ссылки
+          if (isFirst) {
+            sXSD += `
+            <xs:element name="${frmtTag}" type="fssp:${currTbl}" substitutionGroup="fssp:Object"/>`;
+          } else {
+            const aRefs = frmtRecvs.filter(
+              (rec) => rec.recComp && rec.recType == currTbl
+            );
+            aRefs.forEach((rec) => {
+              sXSD += `
+                  <xs:element name="${rec.recID}" type="fssp:${currTbl}" substitutionGroup="fssp:Object"/>`;
+            });
+          }
+          // открыть описание для новой таблицы - составной тип
+          sXSD += `
+            <xs:complexType name="${currTbl}">
+              <xs:annotation>
+                <xs:documentation>${currTblName}</xs:documentation>
+              </xs:annotation>
+              <xs:complexContent>
+                <xs:extension base="fssp:ObjectType">
+                  <xs:sequence>
+            `;
+        }
+      }
+
+      // формирование описания реквизита
+      isComp = x.recComp;
+      if (!skipTbl)
+        sXSD += `<xs:element ${
+          isComp
+            ? `ref="fssp:${x.recID}"`
+            : `name="${x.recID}" type="fssp:${x.recType}"`
+        } minOccurs="${x.recMand ? '1' : '0'}"${
+          isComp ? ' maxOccurs="unbounded"' : ''
+        }>
+  						<xs:annotation>
+  							<xs:documentation>${x.recNo}. ${x.recName}</xs:documentation>${
+          x.recName == x.recDesc
+            ? ''
+            : `
+  							<xs:documentation>${x.recDesc}</xs:documentation>`
+        }
+  						</xs:annotation>
+  					</xs:element>
+          `;
+    });
+    // закрыть описание последней таблицы
+    if (!skipTbl)
+      sXSD += `
+                    </xs:sequence>
+                  </xs:extension>
+                </xs:complexContent>
+              </xs:complexType>
+              `;
+    sXSD += `
+<xs:element name="Object" type="fssp:ObjectType" abstract="true"/>
+	<xs:complexType name="ObjectType">
+		<xs:annotation>
+			<xs:documentation>Базовый класс для всех документов</xs:documentation>
+		</xs:annotation>
+	</xs:complexType>
+</xs:schema>`;
+
+    // выдача результата
+    showLog('<a id="refDownload">Загрузить XSD схему</a>');
+    let refDownload = document.getElementById('refDownload');
+    var taBlob = new Blob([sXSD], { type: 'text/plain' });
+    refDownload.setAttribute('href', URL.createObjectURL(taBlob));
+    refDownload.setAttribute('download', `${frmtTag.toLowerCase()}.xsd`);
+    //document.getElementById('divXSD').innerText = sXSD;
+    document.getElementById('btGetXSD').disabled = true;
+    showLog('Завершение процедуры формирования схемы');
+  });
+
+  // ==================================================
+  document.getElementById('btInpFile').disabled = false;
+  showLog('Инициализация завершена.');
+  showStatus('Приложение готово к работе');
+</script>
